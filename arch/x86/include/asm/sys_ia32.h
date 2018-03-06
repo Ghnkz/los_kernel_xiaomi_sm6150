@@ -35,15 +35,16 @@ asmlinkage long compat_sys_x86_fstatat(unsigned int, const char __user *,
 struct mmap_arg_struct32;
 asmlinkage long compat_sys_x86_mmap(struct mmap_arg_struct32 __user *);
 
+asmlinkage long compat_sys_x86_waitpid(compat_pid_t, unsigned int __user *,
+				       int);
+
 asmlinkage long compat_sys_x86_pread(unsigned int, char __user *, u32, u32,
 				     u32);
 asmlinkage long compat_sys_x86_pwrite(unsigned int, const char __user *, u32,
 				      u32, u32);
 
-asmlinkage long sys32_pread(unsigned int, char __user *, u32, u32, u32);
-asmlinkage long sys32_pwrite(unsigned int, const char __user *, u32, u32, u32);
-
-long sys32_fadvise64_64(int, __u32, __u32, __u32, __u32, int);
+asmlinkage long compat_sys_x86_fadvise64_64(int, __u32, __u32, __u32, __u32,
+					    int);
 
 asmlinkage ssize_t compat_sys_x86_readahead(int, unsigned int, unsigned int,
 					    size_t);
@@ -54,8 +55,6 @@ asmlinkage long compat_sys_x86_fadvise64(int, unsigned int, unsigned int,
 					 size_t, int);
 asmlinkage long compat_sys_x86_fallocate(int, int, unsigned int, unsigned int,
 					 unsigned int, unsigned int);
-asmlinkage long compat_sys_x86_clone(unsigned long, unsigned long, int __user *,
-				     unsigned long, int __user *);
 
 /* ia32/ia32_signal.c */
 asmlinkage long sys32_sigreturn(void);
