@@ -40,9 +40,10 @@ asmlinkage long compat_sys_x86_pread(unsigned int, char __user *, u32, u32,
 asmlinkage long compat_sys_x86_pwrite(unsigned int, const char __user *, u32,
 				      u32, u32);
 
-asmlinkage long compat_sys_x86_fadvise64_64(int, __u32, __u32, __u32, __u32,
-					    int);
-long sys32_vm86_warning(void);
+asmlinkage long sys32_pread(unsigned int, char __user *, u32, u32, u32);
+asmlinkage long sys32_pwrite(unsigned int, const char __user *, u32, u32, u32);
+
+long sys32_fadvise64_64(int, __u32, __u32, __u32, __u32, int);
 
 asmlinkage ssize_t compat_sys_x86_readahead(int, unsigned int, unsigned int,
 					    size_t);
