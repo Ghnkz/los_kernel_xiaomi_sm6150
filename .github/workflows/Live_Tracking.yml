@@ -1,0 +1,790 @@
+name: Live Tracking
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+
+  # ============================================================
+  # TELEGRAM TRACKER
+  # ============================================================
+  tracker:
+    name: Create Telegram Tracker
+    runs-on: ubuntu-latest
+
+    outputs:
+      message_id: ${{ steps.telegram.outputs.message_id }}
+      build_time: ${{ steps.build_time.outputs.build_time }}
+
+    steps:
+
+      - name: 🕒 Generate Build Time
+        id: build_time
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_TIME="$(TZ=Asia/Jakarta date +'%d%m%Y-%H%M')"
+
+          echo "BUILD_TIME=${BUILD_TIME}"
+          echo "build_time=${BUILD_TIME}" >> "$GITHUB_OUTPUT"
+
+      - name: 📡 Create Telegram Tracker
+        id: telegram
+        shell: bash
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          NEVER_DIE_ID: ${{ secrets.NEVER_DIE_ID }}
+          BUILD_TIME: ${{ steps.build_time.outputs.build_time }}
+        run: |
+          set -e
+
+          TEXT="🔨 AGNI REFORGE
+          ━━━━━━━━━━━━━━━━━━━━
+          <code>KSU       ⏳  Waiting
+          KSU-OEM   ⏳  Waiting
+          Non-KSU   ⏳  Waiting</code>
+          ━━━━━━━━━━━━━━━━━━━━
+
+          Branch: ${GITHUB_REF_NAME}
+          Build: #${BUILD_TIME}
+          Run: #${GITHUB_RUN_NUMBER}"
+
+          RESPONSE="$(
+            curl -fsS \
+              -X POST \
+              "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+              --data-urlencode "parse_mode=HTML" \
+              --data-urlencode "text=${TEXT}"
+          )"
+
+          MESSAGE_ID="$(echo "$RESPONSE" | jq -r '.result.message_id')"
+
+          if [ -z "$MESSAGE_ID" ] || [ "$MESSAGE_ID" = "null" ]; then
+            echo "Failed to get Telegram message ID."
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          echo "Telegram message ID: ${MESSAGE_ID}"
+          echo "message_id=${MESSAGE_ID}" >> "$GITHUB_OUTPUT"
+
+
+  # ============================================================
+  # TELEGRAM LIVE TRACKER
+  # ============================================================
+  telegram-live:
+    name: Telegram Live Tracker
+    runs-on: ubuntu-latest
+
+    needs:
+      - tracker
+
+    env:
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      NEVER_DIE_ID: ${{ secrets.NEVER_DIE_ID }}
+      MESSAGE_ID: ${{ needs.tracker.outputs.message_id }}
+      BUILD_TIME: ${{ needs.tracker.outputs.build_time }}
+
+    steps:
+
+      - name: 📡 Live Tracking
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+
+          API_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+
+          FRAME=0
+          LAST_TEXT=""
+
+          get_job() {
+            local jobs="$1"
+            local job_name="$2"
+
+            echo "$jobs" |
+              jq -c --arg NAME "$job_name" \
+              '.jobs[] | select(.name == $NAME)' |
+              head -n 1
+          }
+
+          get_current_step() {
+            local job="$1"
+
+            if [ -z "$job" ] || [ "$job" = "null" ]; then
+              echo "⏳  Waiting"
+              return
+            fi
+
+            local status
+            local conclusion
+            local step
+
+            status="$(echo "$job" | jq -r '.status')"
+            conclusion="$(echo "$job" | jq -r '.conclusion // empty')"
+
+            # --------------------------------------------------
+            # COMPLETED
+            # --------------------------------------------------
+            if [ "$status" = "completed" ]; then
+
+              if [ "$conclusion" = "success" ]; then
+                echo "✅  Done"
+                return
+              fi
+
+              step="$(
+                echo "$job" |
+                  jq -r '
+                    .steps[]
+                    | select(.conclusion == "failure")
+                    | .name
+                  ' |
+                  head -n 1
+              )"
+
+              if [ -n "$step" ]; then
+                echo "❌  ${step}"
+              else
+                echo "❌  Failed"
+              fi
+
+              return
+            fi
+
+            # --------------------------------------------------
+            # QUEUED
+            # --------------------------------------------------
+            if [ "$status" = "queued" ]; then
+              echo "⏳  Waiting"
+              return
+            fi
+
+            # --------------------------------------------------
+            # IN PROGRESS
+            # --------------------------------------------------
+            if [ "$status" = "in_progress" ]; then
+
+              step="$(
+                echo "$job" |
+                  jq -r '
+                    .steps[]
+                    | select(.status == "in_progress")
+                    | .name
+                  ' |
+                  head -n 1
+              )"
+
+              if [ -z "$step" ]; then
+                echo "🔄  Starting..."
+                return
+              fi
+
+              if [ "$FRAME" -eq 0 ]; then
+                echo "⏳  ${step}"
+              else
+                echo "⌛  ${step}"
+              fi
+
+              return
+            fi
+
+            echo "⏳  Waiting"
+          }
+
+          update_telegram() {
+            local text="$1"
+            local markup="${2:-}"
+
+            if [ -n "$markup" ]; then
+              curl -sS \
+                -X POST \
+                "https://api.telegram.org/bot${TG_BOT_TOKEN}/editMessageText" \
+                --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+                --data-urlencode "message_id=${MESSAGE_ID}" \
+                --data-urlencode "parse_mode=HTML" \
+                --data-urlencode "disable_web_page_preview=true" \
+                --data-urlencode "text=${text}" \
+                --data-urlencode "reply_markup=${markup}" \
+                >/dev/null
+            else
+              curl -sS \
+                -X POST \
+                "https://api.telegram.org/bot${TG_BOT_TOKEN}/editMessageText" \
+                --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+                --data-urlencode "message_id=${MESSAGE_ID}" \
+                --data-urlencode "parse_mode=HTML" \
+                --data-urlencode "disable_web_page_preview=true" \
+                --data-urlencode "text=${text}" \
+                >/dev/null
+            fi
+          }
+
+          while true; do
+
+            JOBS="$(
+              curl -fsS \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${API_URL}"
+            )"
+
+            KSU_JOB="$(get_job "$JOBS" "Reforging - KSU")"
+            OEM_JOB="$(get_job "$JOBS" "Reforging - KSU-OEM")"
+            NON_KSU_JOB="$(get_job "$JOBS" "Reforging - Non-KSU")"
+
+            KSU_STATUS="$(get_current_step "$KSU_JOB")"
+            OEM_STATUS="$(get_current_step "$OEM_JOB")"
+            NON_KSU_STATUS="$(get_current_step "$NON_KSU_JOB")"
+
+            KSU_CONCLUSION=""
+            OEM_CONCLUSION=""
+            NON_KSU_CONCLUSION=""
+
+            if [ -n "$KSU_JOB" ] && [ "$KSU_JOB" != "null" ]; then
+              KSU_CONCLUSION="$(echo "$KSU_JOB" | jq -r '.conclusion // empty')"
+            fi
+
+            if [ -n "$OEM_JOB" ] && [ "$OEM_JOB" != "null" ]; then
+              OEM_CONCLUSION="$(echo "$OEM_JOB" | jq -r '.conclusion // empty')"
+            fi
+
+            if [ -n "$NON_KSU_JOB" ] && [ "$NON_KSU_JOB" != "null" ]; then
+              NON_KSU_CONCLUSION="$(echo "$NON_KSU_JOB" | jq -r '.conclusion // empty')"
+            fi
+
+            ALL_SUCCESS=false
+            ALL_COMPLETED=false
+            ANY_FAILED=false
+
+            if \
+              [ "$KSU_CONCLUSION" = "success" ] &&
+              [ "$OEM_CONCLUSION" = "success" ] &&
+              [ "$NON_KSU_CONCLUSION" = "success" ]
+            then
+              ALL_COMPLETED=true
+              ALL_SUCCESS=true
+            elif \
+              [ -n "$KSU_CONCLUSION" ] &&
+              [ -n "$OEM_CONCLUSION" ] &&
+              [ -n "$NON_KSU_CONCLUSION" ]
+            then
+              ALL_COMPLETED=true
+            fi
+
+            if \
+              [ "$KSU_CONCLUSION" = "failure" ] ||
+              [ "$KSU_CONCLUSION" = "cancelled" ] ||
+              [ "$KSU_CONCLUSION" = "timed_out" ] ||
+              [ "$OEM_CONCLUSION" = "failure" ] ||
+              [ "$OEM_CONCLUSION" = "cancelled" ] ||
+              [ "$OEM_CONCLUSION" = "timed_out" ] ||
+              [ "$NON_KSU_CONCLUSION" = "failure" ] ||
+              [ "$NON_KSU_CONCLUSION" = "cancelled" ] ||
+              [ "$NON_KSU_CONCLUSION" = "timed_out" ]
+            then
+              ANY_FAILED=true
+            fi
+
+            # --------------------------------------------------
+            # FINAL SUCCESS
+            # --------------------------------------------------
+            if [ "$ALL_COMPLETED" = true ] && [ "$ALL_SUCCESS" = true ]; then
+
+              TEXT="🔨 AGNI REFORGE
+          ━━━━━━━━━━━━━━━━━━━━
+          <code>KSU       ✅  Done
+          KSU-OEM   ✅  Done
+          Non-KSU   ✅  Done</code>
+          ━━━━━━━━━━━━━━━━━━━━
+
+          Branch: ${GITHUB_REF_NAME}
+          Build: #${BUILD_TIME}
+          Run: #${GITHUB_RUN_NUMBER}
+
+          ━━━━━━━━━━━━━━━━━━━━
+          ✅ All builds completed successfully."
+
+              KEYBOARD="$(
+                jq -nc \
+                  '{
+                    inline_keyboard: [
+                      [
+                        {
+                          text: "📥 Download",
+                          url: "https://sourceforge.net/projects/dirty-project/files/Reforge-Kernel/'"${BUILD_TIME}"'/"
+                        }
+                      ]
+                    ]
+                  }'
+              )"
+
+              update_telegram "$TEXT" "$KEYBOARD"
+
+              echo "All builds completed successfully."
+              exit 0
+            fi
+
+            # --------------------------------------------------
+            # FINAL FAILURE
+            # --------------------------------------------------
+            if [ "$ALL_COMPLETED" = true ] && [ "$ANY_FAILED" = true ]; then
+
+              TEXT="🔨 AGNI REFORGE
+          ━━━━━━━━━━━━━━━━━━━━
+          <code>KSU       ${KSU_STATUS}
+          KSU-OEM   ${OEM_STATUS}
+          Non-KSU   ${NON_KSU_STATUS}</code>
+          ━━━━━━━━━━━━━━━━━━━━
+
+          Branch: ${GITHUB_REF_NAME}
+          Build: #${BUILD_TIME}
+          Run: #${GITHUB_RUN_NUMBER}
+
+          ━━━━━━━━━━━━━━━━━━━━
+          ❌ One or more builds failed."
+
+              update_telegram "$TEXT"
+
+              echo "One or more builds failed."
+              exit 0
+            fi
+
+            # --------------------------------------------------
+            # LIVE STATUS
+            # --------------------------------------------------
+            TEXT="🔨 AGNI REFORGE
+          ━━━━━━━━━━━━━━━━━━━━
+          <code>KSU       ${KSU_STATUS}
+          KSU-OEM   ${OEM_STATUS}
+          Non-KSU   ${NON_KSU_STATUS}</code>
+          ━━━━━━━━━━━━━━━━━━━━
+
+          Branch: ${GITHUB_REF_NAME}
+          Build: #${BUILD_TIME}
+          Run: #${GITHUB_RUN_NUMBER}"
+
+            # --------------------------------------------------
+            # Update every second.
+            # --------------------------------------------------
+            update_telegram "$TEXT"
+
+            # Toggle hourglass animation.
+            if [ "$FRAME" -eq 0 ]; then
+              FRAME=1
+            else
+              FRAME=0
+            fi
+
+            sleep 1
+
+          done
+
+
+  # ============================================================
+  # BUILD MATRIX
+  # ============================================================
+  Reforging:
+    name: Reforging - ${{ matrix.build_type }}
+
+    runs-on: ubuntu-latest
+
+    needs:
+      - tracker
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        build_type:
+          - KSU
+          - KSU-OEM
+          - Non-KSU
+
+    env:
+      KBUILD_BUILD_USER: Manipulator
+      KBUILD_BUILD_HOST: LineageOS
+
+      SOURCEFORGE_PROJECT: ${{ secrets.SOURCEFORGE_PROJECT }}
+      SOURCEFORGE_USERNAME: ${{ secrets.SOURCEFORGE_USERNAME }}
+
+      BUILD_TIME: ${{ needs.tracker.outputs.build_time }}
+
+    steps:
+
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+      - name: 📥 Checkout Kernel
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+
+      # ========================================================
+      # DEPENDENCIES
+      # ========================================================
+      - name: 📦 Install Dependencies
+        shell: bash
+        run: |
+          set -e
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bc \
+            bison \
+            cpio \
+            flex \
+            aria2 \
+            lz4 \
+            libssl-dev \
+            patchelf \
+            rsync \
+            openssh-client \
+            zip \
+            unzip
+
+
+      # ========================================================
+      # SOURCEFORGE SSH
+      # ========================================================
+      - name: 🔐 Setup SourceForge SSH
+        shell: bash
+        env:
+          SOURCEFORGE_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
+        run: |
+          set -e
+
+          mkdir -p ~/.ssh
+
+          printf '%s\n' "$SOURCEFORGE_SSH_KEY" \
+            > ~/.ssh/sourceforge_actions
+
+          chmod 600 ~/.ssh/sourceforge_actions
+
+          ssh-keyscan -H frs.sourceforge.net \
+            >> ~/.ssh/known_hosts
+
+          chmod 644 ~/.ssh/known_hosts
+
+
+      # ========================================================
+      # NEUTRON CLANG
+      # ========================================================
+      - name: ⚙️ Setup Neutron Clang
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p "$HOME/toolchains/neutron-clang"
+
+          cd "$HOME/toolchains/neutron-clang"
+
+          curl -LO \
+            "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+
+          chmod +x antman
+
+          ./antman -S
+          ./antman --patch=glibc
+
+          echo "Neutron Clang installed."
+
+          ls -la "$HOME/toolchains/neutron-clang"
+
+
+      # ========================================================
+      # GCC ARM64
+      # ========================================================
+      - name: ⚙️ Setup GCC ARM64
+        shell: bash
+        run: |
+          set -e
+
+          git clone \
+            --depth=1 \
+            --branch main \
+            https://github.com/greenforce-project/gcc-arm64 \
+            gcc64
+
+
+      # ========================================================
+      # GCC ARM32
+      # ========================================================
+      - name: ⚙️ Setup GCC ARM32
+        shell: bash
+        run: |
+          set -e
+
+          git clone \
+            --depth=1 \
+            --branch main \
+            https://github.com/greenforce-project/gcc-arm \
+            gcc32
+
+
+      # ========================================================
+      # KERNELSU + NOMOUNT
+      # ========================================================
+      - name: 🔐 Setup KernelSU + NoMount
+        if: matrix.build_type == 'KSU' || matrix.build_type == 'KSU-OEM'
+        shell: bash
+        run: |
+          set -e
+
+          echo "Installing KernelSU..."
+
+          curl -LSs \
+            "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" \
+            | bash -s main
+
+          echo "Installing NoMount..."
+
+          curl -LSs \
+            "https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh" \
+            | bash -
+
+
+      # ========================================================
+      # OEM DISPLAY DIMENSIONS
+      # ========================================================
+      - name: 📱 Apply OEM Display Dimensions
+        if: matrix.build_type == 'KSU-OEM'
+        shell: bash
+        run: |
+          set -e
+
+          DTS="arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0c-0a-fhd-dsc-video.dtsi"
+
+          test -f "$DTS"
+
+          sed -i \
+            's/qcom,mdss-pan-physical-width-dimension = <69>;/qcom,mdss-pan-physical-width-dimension = <695>;/g' \
+            "$DTS"
+
+          sed -i \
+            's/qcom,mdss-pan-physical-height-dimension = <154>;/qcom,mdss-pan-physical-height-dimension = <1546>;/g' \
+            "$DTS"
+
+          echo "OEM display dimensions applied."
+
+
+      # ========================================================
+      # DEFCONFIG
+      # ========================================================
+      - name: 🧩 Generate Defconfig
+        shell: bash
+        run: |
+          set -e
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            vendor/sweet_defconfig
+
+
+      # ========================================================
+      # BUILD KERNEL
+      # ========================================================
+      - name: 🔨 Build Kernel
+        shell: bash
+        run: |
+          set -e
+
+          CLANG_PATH="$HOME/toolchains/neutron-clang"
+          GCC64_PATH="${GITHUB_WORKSPACE}/gcc64"
+          GCC32_PATH="${GITHUB_WORKSPACE}/gcc32"
+
+          export PATH="${CLANG_PATH}/bin:${GCC64_PATH}/bin:${GCC32_PATH}/bin:${PATH}"
+
+          BUILD_DATE="$(date +%s)"
+
+          export CFLAGS_EXTRA="-DBUILD_DATE=${BUILD_DATE}"
+
+          echo "=========================================="
+          echo "Build Type : ${{ matrix.build_type }}"
+          echo "Build Date : ${BUILD_DATE}"
+          echo "=========================================="
+
+          clang --version
+
+          make \
+            -j"$(nproc --all)" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            CLANG_TRIPLE="${CLANG_PATH}/aarch64-linux-gnu-" \
+            CROSS_COMPILE="${GCC64_PATH}/bin/aarch64-elf-" \
+            CROSS_COMPILE_ARM32="${GCC32_PATH}/bin/arm-eabi-" \
+            KBUILD_BUILD_USER="${KBUILD_BUILD_USER}" \
+            KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST}" \
+            KBUILD_COMPILER_STRING="${CLANG_PATH}/clang"
+
+
+      # ========================================================
+      # SAVE DEFCONFIG
+      # ========================================================
+      - name: 📄 Save Defconfig
+        shell: bash
+        run: |
+          set -e
+
+          cp \
+            out/.config \
+            out/sweet_defconfig.txt
+
+
+      # ========================================================
+      # ANYKERNEL3
+      # ========================================================
+      - name: 📦 Prepare AnyKernel3
+        shell: bash
+        run: |
+          set -e
+
+          git clone \
+            --depth=1 \
+            --branch reforge \
+            https://github.com/manipvlator/Anykernel3.git \
+            AnyKernel3
+
+          cp \
+            out/arch/arm64/boot/Image.gz \
+            AnyKernel3/
+
+          cp \
+            out/arch/arm64/boot/dtbo.img \
+            AnyKernel3/
+
+          cp \
+            out/arch/arm64/boot/dtb.img \
+            AnyKernel3/
+
+
+      # ========================================================
+      # CREATE ZIP
+      # ========================================================
+      - name: 🗜️ Create Flashable ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_NAME="Reforge_${{ matrix.build_type }}-${{ github.ref_name }}-${BUILD_TIME}.zip"
+
+          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+          cd AnyKernel3
+
+          zip -r9 \
+            "../${ZIP_NAME}" \
+            . \
+            -x ".git/*"
+
+          cd ..
+
+          ls -lh "${ZIP_NAME}"
+
+
+      # ========================================================
+      # GITHUB ZIP ARTIFACT
+      # ========================================================
+      - name: 📤 Upload ZIP Artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: Reforge_${{ matrix.build_type }}-${{ github.ref_name }}-${{ env.BUILD_TIME }}
+          path: AnyKernel3/*
+
+
+      # ========================================================
+      # GITHUB DEFCONFIG ARTIFACT
+      # ========================================================
+      - name: 📤 Upload Defconfig Artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: configs-${{ matrix.build_type }}-${{ env.BUILD_TIME }}
+          path: out/sweet_defconfig.txt
+
+
+      # ========================================================
+      # SOURCEFORGE UPLOAD
+      # ========================================================
+      - name: 🚀 Upload ZIP to SourceForge
+        shell: bash
+        env:
+          SOURCEFORGE_PROJECT: ${{ secrets.SOURCEFORGE_PROJECT }}
+          SOURCEFORGE_USERNAME: ${{ secrets.SOURCEFORGE_USERNAME }}
+          BUILD_TIME: ${{ needs.tracker.outputs.build_time }}
+        run: |
+          set -e
+
+          SOURCEFORGE_BASE="/home/frs/project/${SOURCEFORGE_PROJECT}/Reforge-Kernel"
+          SOURCEFORGE_PATH="${SOURCEFORGE_BASE}/${BUILD_TIME}"
+
+          echo "=========================================="
+          echo "SourceForge Upload"
+          echo "=========================================="
+          echo "Project : ${SOURCEFORGE_PROJECT}"
+          echo "Folder  : Reforge-Kernel/${BUILD_TIME}"
+          echo "ZIP     : ${ZIP_NAME}"
+          echo "=========================================="
+
+          sftp \
+            -i ~/.ssh/sourceforge_actions \
+            -oBatchMode=yes \
+            -oStrictHostKeyChecking=yes \
+            "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" <<EOF
+          -mkdir ${SOURCEFORGE_BASE}
+          -mkdir ${SOURCEFORGE_PATH}
+          bye
+          EOF
+
+          sftp \
+            -i ~/.ssh/sourceforge_actions \
+            -oBatchMode=yes \
+            -oStrictHostKeyChecking=yes \
+            "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" <<EOF
+          cd ${SOURCEFORGE_PATH}
+          put ${ZIP_NAME}
+          bye
+          EOF
+
+          echo "SourceForge upload completed successfully."
+
+
+  # ============================================================
+  # FINAL
+  # ============================================================
+  final:
+    name: Final
+    runs-on: ubuntu-latest
+
+    needs:
+      - tracker
+      - Reforging
+      - telegram-live
+
+    if: always()
+
+    steps:
+
+      - name: 📊 Final Status
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "AGNI REFORGE FINAL STATUS"
+          echo "=========================================="
+          echo "Tracker       : ${{ needs.tracker.result }}"
+          echo "Reforging     : ${{ needs.Reforging.result }}"
+          echo "Telegram Live : ${{ needs.telegram-live.result }}"
+          echo "=========================================="
