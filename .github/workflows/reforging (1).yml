@@ -254,15 +254,15 @@ jobs:
         cd AnyKernel3
 
         zip -r9 \
-          "../Reforge-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip" \
+          "../Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip" \
           . \
           -x ".git/*"
 
     - name: 📤 Upload Flashable Zip
       uses: actions/upload-artifact@v5
       with:
-        name: Reforge-${{ github.ref_name }}-${{ env.BUILD_TIME }}
-        path: Reforge-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip
+        name: Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}
+        path: Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip
 
     - name: 📨 Kirim ke Telegram
       shell: bash
@@ -272,7 +272,7 @@ jobs:
         TELEGRAM_BOT_TOKEN="8843798051:AAHHSmDioK63hm5xdlgaUm355te88WNGH1s"
         TELEGRAM_CHAT_ID="-1002531162824"
 
-        ZIP_FILE="Reforge-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip"
+        ZIP_FILE="Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip"
 
         CAPTION="🛠️ *Reforge Kernel Build*
         📦 Build type: \`${{ github.event.inputs.build_type }}\`
