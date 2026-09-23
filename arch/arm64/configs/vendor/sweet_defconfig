@@ -6161,8 +6161,11 @@ CONFIG_MACH_XIAOMI_SWEET=y
 # CONFIG_MACH_XIAOMI_VIOLET is not set
 
 #
-# Tech packages
+# KernelSU
 #
+CONFIG_KSU=y
+CONFIG_KSU_TAMPER_SYSCALL_TABLE=y
+CONFIG_KSU_SUSFS=y
 
 #
 # Techpack audio options
