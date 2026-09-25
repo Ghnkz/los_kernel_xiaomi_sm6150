@@ -21,26 +21,86 @@ on:
           - AOSP-Clang
           - Neutron-Clang
 
+env:
+  TELEGRAM_BOT_TOKEN: "8843798051:AAHHSmDioK63hm5xdlgaUm355te88WNGH1s"
+  TELEGRAM_CHAT_ID: "-1002531162824"
+
 jobs:
   Reforging:
     runs-on: ubuntu-latest
 
     steps:
+    - name: 📨 Notify - Workflow Started
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="🚀 *Reforge Kernel — Workflow Started*
+        📦 Build type: \`${{ github.event.inputs.build_type }}\`
+        ⚙️ Compiler: \`${{ github.event.inputs.compiler }}\`
+        🌿 Branch: \`${{ github.ref_name }}\`
+        👤 By: \`${{ github.actor }}\`
+        🔗 Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
     - name: 🔄 Checkout Code
       uses: actions/checkout@v5
       with:
         submodules: recursive
         fetch-depth: 1
 
+    - name: 📨 Notify - Checkout Done
+      if: always()
+      shell: bash
+      run: |
+        STATUS="✅ success"
+        if [ "${{ job.status }}" != "success" ] && [ "${{ steps.checkout.outcome }}" == "failure" ]; then STATUS="❌ failed"; fi
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="🔄 *Checkout Code* step finished"
+
     - name: ⏰ Prepare timezone
       run: |
         sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
-        
+
+    - name: 📨 Notify - Timezone Set
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="⏰ *Prepare timezone* step finished"
+
     - name: 🥷 Implant NoMount
       run: curl -LSs "https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh" | bash -
 
+    - name: 📨 Notify - NoMount Implanted
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="🥷 *Implant NoMount* step finished"
+
     - name: 📥 Setup KernelSU
       run: curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
+
+    - name: 📨 Notify - KernelSU Setup Done
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="📥 *Setup KernelSU* step finished"
 
     - name: 📦 Install Dependencies
       run: |
@@ -64,10 +124,31 @@ jobs:
           zip \
           zstd
 
+    - name: 📨 Notify - Dependencies Installed
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="📦 *Install Dependencies* step finished"
+
     - name: ⚙️ Setup Environment
       run: |
         echo "BUILD_TIME=$(TZ=Asia/Jakarta date '+%d%m%Y-%H%M')" >> "$GITHUB_ENV"
         echo "BUILD_DATE=\"$(TZ=Asia/Jakarta date '+%b %d %Y')\"" >> "$GITHUB_ENV"
+
+    - name: 📨 Notify - Environment Ready
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="⚙️ *Setup Environment* step finished
+        📅 Build date: \`$BUILD_DATE\`"
 
     - name: 🔧 Setup Compiler
       shell: bash
@@ -125,6 +206,17 @@ jobs:
         "$GITHUB_WORKSPACE/clang/bin/clang" --version | head -n 1
         "$GITHUB_WORKSPACE/clang/bin/ld.lld" --version | head -n 1
 
+    - name: 📨 Notify - Compiler Ready
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="🔧 *Setup Compiler* step finished
+        ⚙️ Compiler: \`${{ github.event.inputs.compiler }}\`"
+
     - name: 📱 Patch Panel Dimensions
       shell: bash
       run: |
@@ -160,6 +252,16 @@ jobs:
         else
             apply_panel_dimensions 695 1546
         fi
+
+    - name: 📨 Notify - Panel Dimensions Patched
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="📱 *Patch Panel Dimensions* step finished"
 
     - name: 🛠️ Build Kernel
       shell: bash
@@ -205,6 +307,21 @@ jobs:
 
         cp out/.config out/sweet_defconfig.txt
 
+    - name: 📨 Notify - Kernel Build Finished
+      if: always()
+      shell: bash
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          TEXT="🛠️ *Build Kernel* step finished — ✅ compilation succeeded so far"
+        else
+          TEXT="🛠️ *Build Kernel* step finished — ❌ compilation FAILED"
+        fi
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="$TEXT"
+
     - name: ✅ Verify Kernel Build
       shell: bash
       run: |
@@ -231,11 +348,36 @@ jobs:
           exit 1
         fi
 
+    - name: 📨 Notify - Verify Result
+      if: always()
+      shell: bash
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          TEXT="✅ *Verify Kernel Build* step finished — all output files found"
+        else
+          TEXT="❌ *Verify Kernel Build* step FAILED — one or more output files missing"
+        fi
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="$TEXT"
+
     - name: 💾 Upload configs
       uses: actions/upload-artifact@v5
       with:
         name: configs-${{ env.BUILD_TIME }}
         path: out/sweet_defconfig.txt
+
+    - name: 📨 Notify - Config Uploaded
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="💾 *Upload configs* step finished"
 
     - name: 📂 Clone AnyKernel3 & Zip
       shell: bash
@@ -258,19 +400,36 @@ jobs:
           . \
           -x ".git/*"
 
+    - name: 📨 Notify - AnyKernel3 Zip Ready
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="📂 *Clone AnyKernel3 & Zip* step finished — flashable zip created"
+
     - name: 📤 Upload Flashable Zip
       uses: actions/upload-artifact@v5
       with:
         name: Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}
         path: Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip
 
+    - name: 📨 Notify - Zip Uploaded to Artifacts
+      if: always()
+      shell: bash
+      run: |
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="📤 *Upload Flashable Zip* step finished — zip uploaded as GitHub Actions artifact"
+
     - name: 📨 Kirim ke Telegram
       shell: bash
       run: |
         set -e
-
-        TELEGRAM_BOT_TOKEN="8843798051:AAHHSmDioK63hm5xdlgaUm355te88WNGH1s"
-        TELEGRAM_CHAT_ID="-1002531162824"
 
         ZIP_FILE="Reforge-sweet2-${{ github.ref_name }}-${{ env.BUILD_TIME }}.zip"
 
@@ -287,3 +446,21 @@ jobs:
           -F document=@"${ZIP_FILE}" \
           -F caption="${CAPTION}" \
           -F parse_mode="Markdown"
+
+    - name: 📨 Notify - Workflow Finished
+      if: always()
+      shell: bash
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          TEXT="🎉 *Reforge Kernel — Workflow Finished Successfully* 🎉
+        📦 Build type: \`${{ github.event.inputs.build_type }}\`
+        ⚙️ Compiler: \`${{ github.event.inputs.compiler }}\`"
+        else
+          TEXT="⚠️ *Reforge Kernel — Workflow Finished With Errors* ⚠️
+        Check the run log: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        fi
+        curl -sS -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          -d chat_id="${TELEGRAM_CHAT_ID}" \
+          -d parse_mode="Markdown" \
+          -d text="$TEXT"
